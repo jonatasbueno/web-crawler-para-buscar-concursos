@@ -1,0 +1,10 @@
+[Unit]
+Description=Executa crawler de concursos diariamente às 10h
+
+[Timer]
+OnCalendar=*-*-* 10:00:00
+Persistent=true
+Unit=crawler-concursos.service
+
+[Install]
+WantedBy=timers.target

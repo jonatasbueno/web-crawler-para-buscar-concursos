@@ -1,0 +1,14 @@
+[Unit]
+Description=Crawler Concursos - raspagem diária
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=__PROJECT_DIR__
+EnvironmentFile=-__PROJECT_DIR__/.env
+ExecStart=/usr/bin/node src/index.js
+StandardOutput=append:__PROJECT_DIR__/data/cron.log
+StandardError=append:__PROJECT_DIR__/data/cron.log
+
+[Install]
+WantedBy=default.target
