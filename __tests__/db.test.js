@@ -6,6 +6,7 @@ import {
   initDb,
   closeDb,
   resetDb,
+  limparRegistros,
   jaExecutouHoje,
   reservarExecucao,
   registrarExecucao,
@@ -117,6 +118,26 @@ describe('db', () => {
     await closeDb();
     await resetDb({ path: ':memory:' });
     expect(getDbPath()).toBe(':memory:');
+  });
+
+  it('limparRegistros remove todos os registros', async () => {
+    await upsertConcursos([concurso]);
+    await registrarExecucao({ runDate: '2026-06-14', status: 'success', total: 1 });
+
+    const removidos = await limparRegistros();
+    expect(removidos.concursos).toBe(1);
+    expect(removidos.cronRuns).toBe(1);
+
+    const knex = __testing.getKnex();
+    const { total: totalConcursos } = await knex('concursos').count({ total: '*' }).first();
+    const { total: totalCron } = await knex('cron_runs').count({ total: '*' }).first();
+    expect(Number(totalConcursos)).toBe(0);
+    expect(Number(totalCron)).toBe(0);
+  });
+
+  it('limparRegistros falha sem banco inicializado', async () => {
+    await closeDb();
+    await expect(limparRegistros()).rejects.toThrow('Banco não inicializado');
   });
 
   it('initDb usa caminho padrão quando path omitido', async () => {

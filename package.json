@@ -9,6 +9,7 @@
     "run-once": "node src/cli.js",
     "run:loose": "node src/cli.js --run-loose",
     "cron:install": "bash scripts/install-cron.sh",
+    "db:clear": "node scripts/limpar-banco.js",
     "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js --coverage",
     "test:watch": "node --experimental-vm-modules node_modules/jest/bin/jest.js --watch"
   },

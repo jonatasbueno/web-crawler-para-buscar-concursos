@@ -67,6 +67,31 @@ export async function resetDb(options = {}) {
   await initDb({ path: dbPath });
 }
 
+/** Remove todos os registros, mantendo o schema e o arquivo do banco. */
+export async function limparRegistros() {
+  if (!knexInstance) {
+    throw new Error('Banco não inicializado');
+  }
+
+  const { total: totalConcursos } = await knexInstance(TABELAS.CONCURSOS)
+    .count({ total: '*' })
+    .first();
+  const { total: totalCronRuns } = await knexInstance(TABELAS.CRON_RUNS)
+    .count({ total: '*' })
+    .first();
+
+  await knexInstance(TABELAS.CONCURSOS).del();
+  await knexInstance(TABELAS.CRON_RUNS).del();
+  await knexInstance('sqlite_sequence')
+    .whereIn('name', [TABELAS.CONCURSOS, TABELAS.CRON_RUNS])
+    .del();
+
+  return {
+    concursos: Number(totalConcursos),
+    cronRuns: Number(totalCronRuns)
+  };
+}
+
 export async function jaExecutouHoje(runDate) {
   const registro = await knexInstance(TABELAS.CRON_RUNS)
     .where({ run_date: runDate, status: STATUS.SUCCESS })
