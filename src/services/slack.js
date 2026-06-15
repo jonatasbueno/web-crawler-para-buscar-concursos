@@ -6,6 +6,9 @@ import {
   sanitizeSlackText,
   pertenceWhitelist
 } from '../utils/security.js';
+import { abreviarFonte } from '../utils/looseScrape.js';
+
+const TITULO_RASPAGEM_AVULSA = 'Raspagem avulsa de regras de armazenamento';
 
 const MAX_CONCURSOS_POR_MENSAGEM = 20;
 const TIMEOUT_MS = 15_000;
@@ -17,6 +20,78 @@ const slackClient = axios.create({
   httpsAgent: new https.Agent({ keepAlive: false }),
   validateStatus: (status) => status >= 200 && status < 300
 });
+
+function criarBlocoConcursoAvulso(concurso) {
+  const link = pertenceWhitelist(concurso.link) ? concurso.link : null;
+  const linkTexto = link ? `<${link}|Ver edital>` : 'Link indisponível';
+  const fonte = abreviarFonte(concurso.fonte);
+
+  return {
+    type: 'section',
+    text: {
+      type: 'mrkdwn',
+      text: [
+        `*${sanitizeSlackText(concurso.cidade)}* — ${sanitizeSlackText(concurso.orgao)}`,
+        `${sanitizeSlackText(concurso.escolaridade)} | ${fonte}`,
+        linkTexto
+      ].join('\n')
+    }
+  };
+}
+
+function montarPayloadRaspagemAvulsa({ concursos, analise, runDate }) {
+  const blocos = [
+    {
+      type: 'header',
+      text: { type: 'plain_text', text: TITULO_RASPAGEM_AVULSA }
+    },
+    {
+      type: 'context',
+      elements: [{ type: 'mrkdwn', text: `_Data: ${sanitizeSlackText(runDate)}_` }]
+    }
+  ];
+
+  if (analise.length > 0) {
+    blocos.push(
+      { type: 'divider' },
+      {
+        type: 'section',
+        text: {
+          type: 'mrkdwn',
+          text: `*Diagnóstico*\n${analise.map((linha) => sanitizeSlackText(linha)).join('\n')}`
+        }
+      }
+    );
+  }
+
+  blocos.push({ type: 'divider' });
+
+  if (concursos.length === 0) {
+    blocos.push({
+      type: 'section',
+      text: { type: 'mrkdwn', text: '_Nenhum concurso encontrado na região._' }
+    });
+  } else {
+    blocos.push({
+      type: 'section',
+      text: {
+        type: 'mrkdwn',
+        text: `*${concursos.length} concurso(s) encontrado(s)*`
+      }
+    });
+    blocos.push(...concursos.slice(0, MAX_CONCURSOS_POR_MENSAGEM).map(criarBlocoConcursoAvulso));
+
+    if (concursos.length > MAX_CONCURSOS_POR_MENSAGEM) {
+      const restantes = concursos.length - MAX_CONCURSOS_POR_MENSAGEM;
+      blocos.push({
+        type: 'context',
+        elements: [{ type: 'mrkdwn', text: `_+${restantes} concursos adicionais._` }]
+      });
+    }
+  }
+
+  return { blocks: blocos };
+}
 
 function criarBlocoConcurso(concurso) {
   const link = pertenceWhitelist(concurso.link) ? concurso.link : null;
@@ -126,6 +201,17 @@ export async function notificarBloqueio(fonte, tipo, runDate) {
 
   if (enviado) {
     console.log(`[slack] Alerta de bloqueio enviado (${fonte}: ${tipo}).`);
+  }
+}
+
+/** Raspagem avulsa: envia todos os concursos encontrados com diagnóstico de falhas. */
+export async function notificarRaspagemAvulsa({ concursos, analise, runDate }) {
+  const enviado = await enviarWebhook(
+    montarPayloadRaspagemAvulsa({ concursos, analise, runDate })
+  );
+
+  if (enviado) {
+    console.log(`[slack] Raspagem avulsa enviada (${concursos.length} concursos).`);
   }
 }
 

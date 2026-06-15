@@ -4,6 +4,6 @@
  */
 import { isEntryPoint, runCli } from './index.js';
 
-if (isEntryPoint()) {
+if (isEntryPoint(process.argv, import.meta.url)) {
   runCli();
 }

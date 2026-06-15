@@ -2,6 +2,7 @@ import path from 'path';
 import { pathToFileURL } from 'url';
 import {
   initDb,
+  closeDb,
   jaExecutouHoje,
   reservarExecucao,
   registrarExecucao,
@@ -11,9 +12,11 @@ import {
 import {
   notificarConcursos,
   notificarBloqueio,
-  notificarCoberturaVazia
+  notificarCoberturaVazia,
+  notificarRaspagemAvulsa
 } from './services/slack.js';
 import { BloqueioFonteError } from './utils/spiderHelpers.js';
+import { analisarCausaRaiz, ordenarConcursosAvulsa } from './utils/looseScrape.js';
 import jcConcursos from './spiders/jcConcursos.js';
 import pciConcursos from './spiders/pciConcursos.js';
 import { hojeLocal, horaLocal } from './utils/geoFilter.js';
@@ -103,6 +106,33 @@ export async function executarRaspagem(motivo = 'manual', spiders = SPIDERS) {
   }
 }
 
+export async function executarRaspagemAvulsa(spiders = SPIDERS) {
+  const runDate = hojeLocal();
+
+  console.log('[run:loose] Iniciando raspagem avulsa...');
+
+  const { concursos, falhas, bloqueios } = await coletarConcursos(spiders);
+  const unicos = ordenarConcursosAvulsa(deduplicarPorLink(concursos));
+  const analise = analisarCausaRaiz({
+    falhas,
+    bloqueios,
+    concursos: unicos,
+    totalFontes: spiders.length
+  });
+
+  exibirResultados(unicos);
+
+  await notificarRaspagemAvulsa({ concursos: unicos, analise, runDate });
+
+  console.log(`[run:loose] ${unicos.length} concurso(s) encontrado(s).`);
+
+  if (falhas.length === spiders.length && bloqueios.length === 0) {
+    throw new Error(falhas.join(' | '));
+  }
+
+  return { concursos: unicos, falhas, bloqueios };
+}
+
 /**
  * Catch-up no boot: se passou das 10h e o dia ainda não rodou, executa agora.
  * Antes das 10h delega ao timer do systemd.
@@ -136,24 +166,33 @@ export function exibirResultados(concursos) {
 }
 
 export async function main(argv = process.argv) {
+  if (argv.includes('--run-loose')) {
+    await executarRaspagemAvulsa();
+    return;
+  }
+
   await initDb();
 
-  if (argv.includes('--list-today')) {
-    exibirResultados(await listarConcursosRecentes(hojeLocal()));
-    return;
-  }
+  try {
+    if (argv.includes('--list-today')) {
+      exibirResultados(await listarConcursosRecentes(hojeLocal()));
+      return;
+    }
 
-  if (argv.includes('--catch-up')) {
-    await verificarExecucaoPendente();
-    return;
-  }
+    if (argv.includes('--catch-up')) {
+      await verificarExecucaoPendente();
+      return;
+    }
 
-  await executarRaspagem('systemd-cron');
+    await executarRaspagem('systemd-cron');
+  } finally {
+    await closeDb();
+  }
 }
 
 /** Detecta se o módulo foi invocado diretamente (node src/cli.js). */
-export function isEntryPoint(argv = process.argv) {
-  return Boolean(argv[1] && import.meta.url === pathToFileURL(path.resolve(argv[1])).href);
+export function isEntryPoint(argv = process.argv, entryUrl = import.meta.url) {
+  return Boolean(argv[1] && entryUrl === pathToFileURL(path.resolve(argv[1])).href);
 }
 
 export async function runCli(argv = process.argv, exit = process.exit.bind(process), runner = main) {

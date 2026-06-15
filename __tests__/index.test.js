@@ -1,4 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, jest } from '@jest/globals';
+import path from 'path';
+import { pathToFileURL } from 'url';
 import { BloqueioFonteError } from '../src/utils/spiderHelpers.js';
 
 const postMock = jest.fn().mockResolvedValue({ status: 200 });
@@ -119,6 +121,40 @@ describe('index', () => {
     await expect(index.executarRaspagem(undefined, [spiderOk])).resolves.toHaveLength(1);
   });
 
+  it('raspagem avulsa falha quando todas as fontes falham', async () => {
+    const spiderFail2 = {
+      name: 'failSpider2',
+      scrape: jest.fn().mockRejectedValue(new Error('outra falha'))
+    };
+
+    await expect(index.executarRaspagemAvulsa([spiderFail, spiderFail2])).rejects.toThrow('falha');
+  });
+
+  it('executa raspagem avulsa sem persistir no banco', async () => {
+    const resultado = await index.executarRaspagemAvulsa([spiderOk]);
+
+    expect(resultado.concursos).toHaveLength(1);
+    expect(postMock).toHaveBeenCalled();
+
+    const payload = postMock.mock.calls.at(-1)[1];
+    expect(payload.blocks[0].text.text).toBe('Raspagem avulsa de regras de armazenamento');
+  });
+
+  it('raspagem avulsa roda mesmo após execução diária', async () => {
+    await index.executarRaspagem('teste', [spiderOk]);
+    postMock.mockClear();
+
+    const resultado = await index.executarRaspagemAvulsa([spiderOk]);
+    expect(resultado.concursos).toHaveLength(1);
+    expect(postMock).toHaveBeenCalled();
+  });
+
+  it('main executa flag run-loose', async () => {
+    postMock.mockClear();
+    await index.main(['node', 'cli.js', '--run-loose']);
+    expect(postMock).toHaveBeenCalled();
+  });
+
   it('executa raspagem completa com spider mockado', async () => {
     const resultado = await index.executarRaspagem('teste', [spiderOk]);
     expect(resultado).toHaveLength(1);
@@ -182,8 +218,9 @@ describe('index', () => {
   });
 
   it('identifica entrypoint', () => {
-    expect(index.isEntryPoint(['node', '/tmp/outro.js'])).toBe(false);
-    expect(index.isEntryPoint(['node', 'src/index.js'])).toBe(true);
+    const cliUrl = pathToFileURL(path.resolve('src/cli.js')).href;
+    expect(index.isEntryPoint(['node', '/tmp/outro.js'], cliUrl)).toBe(false);
+    expect(index.isEntryPoint(['node', 'src/cli.js'], cliUrl)).toBe(true);
     expect(typeof index.isEntryPoint()).toBe('boolean');
   });
 

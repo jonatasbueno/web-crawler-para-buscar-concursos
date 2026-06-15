@@ -1,10 +1,15 @@
 import { describe, it, expect, jest } from '@jest/globals';
 
 const fetchMock = jest.fn();
+const execFileMock = jest.fn();
+
+jest.unstable_mockModule('node:child_process', () => ({
+  execFile: execFileMock
+}));
 
 global.fetch = fetchMock;
 
-const { createHttpClient, validarUrlFetch, fetchComLimites } = await import('../src/utils/httpClient.js');
+const { createHttpClient, validarUrlFetch, fetchComLimites, fetchComCurl } = await import('../src/utils/httpClient.js');
 
 function mockResponse({ status = 200, body = '<html></html>', headers = {} } = {}) {
   return {
@@ -19,7 +24,12 @@ function mockResponse({ status = 200, body = '<html></html>', headers = {} } = {
 describe('httpClient', () => {
   beforeEach(() => {
     fetchMock.mockReset();
+    execFileMock.mockReset();
     fetchMock.mockResolvedValue(mockResponse());
+    execFileMock.mockImplementation((_cmd, _args, _opts, cb) => {
+      const callback = typeof _opts === 'function' ? _opts : cb;
+      callback(null, { stdout: '<html>curl</html>\n__CURL_META__200__https://jcconcursos.com.br/x__' });
+    });
   });
 
   it('cria cliente HTTP com método get', async () => {
@@ -48,6 +58,85 @@ describe('httpClient', () => {
     const html = await client.get('https://jcconcursos.com.br/');
     expect(html).toBe('<html>ok</html>');
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('usa curl como fallback em HTTP 403', async () => {
+    fetchMock.mockResolvedValue(mockResponse({ status: 403 }));
+    const client = createHttpClient();
+    const html = await client.get('https://jcconcursos.com.br/concursos/sp', {
+      headers: { 'User-Agent': 'test' }
+    });
+    expect(html).toBe('<html>curl</html>');
+    expect(execFileMock).toHaveBeenCalled();
+  });
+
+  it('rejeita redirect do curl para host não permitido', async () => {
+    execFileMock.mockImplementation((_cmd, _args, _opts, cb) => {
+      const callback = typeof _opts === 'function' ? _opts : cb;
+      callback(null, { stdout: '<html></html>\n__CURL_META__200__https://evil.com/x__' });
+    });
+
+    await expect(fetchComCurl('https://jcconcursos.com.br/x')).rejects.toThrow('URL não permitida');
+  });
+
+  it('rejeita corpo acima do limite no curl', async () => {
+    const huge = 'x'.repeat(5 * 1024 * 1024 + 1);
+    execFileMock.mockImplementation((_cmd, _args, _opts, cb) => {
+      const callback = typeof _opts === 'function' ? _opts : cb;
+      callback(null, { stdout: `${huge}\n__CURL_META__200__https://jcconcursos.com.br/x__` });
+    });
+
+    await expect(fetchComCurl('https://jcconcursos.com.br/x')).rejects.toThrow('tamanho máximo');
+  });
+
+  it('rejeita HTTP de erro retornado pelo curl', async () => {
+    execFileMock.mockImplementation((_cmd, _args, _opts, cb) => {
+      const callback = typeof _opts === 'function' ? _opts : cb;
+      callback(null, { stdout: '<html></html>\n__CURL_META__500__https://jcconcursos.com.br/x__' });
+    });
+
+    await expect(fetchComCurl('https://jcconcursos.com.br/x')).rejects.toThrow('HTTP 500');
+  });
+
+  it('rejeita timeout do curl', async () => {
+    execFileMock.mockImplementation((_cmd, _args, _opts, cb) => {
+      const callback = typeof _opts === 'function' ? _opts : cb;
+      const error = new Error('timeout');
+      error.code = 28;
+      callback(error);
+    });
+
+    await expect(fetchComCurl('https://jcconcursos.com.br/x')).rejects.toThrow('Timeout');
+  });
+
+  it('ignora headers vazios no curl', async () => {
+    execFileMock.mockImplementation((_cmd, args, _opts, cb) => {
+      const callback = typeof _opts === 'function' ? _opts : cb;
+      expect(args.filter((arg) => arg === '-H')).toHaveLength(1);
+      callback(null, { stdout: '<html>curl</html>\n__CURL_META__200__https://jcconcursos.com.br/x__' });
+    });
+
+    await fetchComCurl('https://jcconcursos.com.br/x', { headers: { 'User-Agent': 'test', 'X-Empty': '' } });
+  });
+
+  it('rejeita curl interrompido', async () => {
+    execFileMock.mockImplementation((_cmd, _args, _opts, cb) => {
+      const callback = typeof _opts === 'function' ? _opts : cb;
+      const error = new Error('killed');
+      error.killed = true;
+      callback(error);
+    });
+
+    await expect(fetchComCurl('https://jcconcursos.com.br/x')).rejects.toThrow('Timeout');
+  });
+
+  it('rejeita resposta inválida do curl', async () => {
+    execFileMock.mockImplementation((_cmd, _args, _opts, cb) => {
+      const callback = typeof _opts === 'function' ? _opts : cb;
+      callback(null, { stdout: '<html>sem meta</html>' });
+    });
+
+    await expect(fetchComCurl('https://jcconcursos.com.br/x')).rejects.toThrow('Resposta inválida do curl');
   });
 
   it('rejeita resposta HTTP de erro', async () => {
