@@ -1,6 +1,6 @@
 # Crawler de Concursos Públicos
 
-Crawler modular em Node.js que monitora concursos públicos com inscrições abertas na região de **Capivari-SP** (raio de ~100 km). Os resultados são persistidos em SQLite via **Knex.js** e notificados no Slack quando há concursos **novos**, **bloqueios nas fontes** ou **cobertura vazia**.
+Crawler modular em Node.js que monitora concursos públicos com inscrições abertas na região de **Capivari-SP** (raio de ~100 km). Os resultados são persistidos em SQLite via **Knex.js** e notificados no Slack quando há concursos **novos**, **bloqueios nas fontes** ou **cobertura vazia**. Há também um modo de **raspagem avulsa** para diagnóstico manual sem persistir no banco.
 
 ---
 
@@ -24,9 +24,11 @@ O runtime já oferece `fetch` nativo (baseado em undici) a partir da v18, elimin
 ### Arquitetura modular
 
 - **Spiders independentes** — cada fonte (`jcConcursos`, `pciConcursos`) é um módulo com interface `{ name, scrape }`. Falha em uma fonte não aborta a outra.
-- **Orquestrador** (`index.js`) — deduplica, persiste, decide notificações e controla execução diária.
+- **Orquestrador** (`src/index.js`) — deduplica, persiste, decide notificações e controla execução diária.
+- **Helpers dos spiders** (`spiderHelpers.js`) — fetch centralizado, detecção de bloqueio anti-bot e montagem dos objetos de concurso.
 - **Camada de segurança** — whitelist de domínios (`pertenceWhitelist`) bloqueia SSRF antes de qualquer fetch; links extraídos passam por `normalizarLinkSeguro`.
-- **Detecção de bloqueios** — HTML das fontes é inspecionado por padrões de captcha/Cloudflare; alertas vão ao Slack com o tipo de bloqueio.
+- **Detecção de bloqueios** — HTML das fontes é inspecionado por padrões de captcha/Cloudflare em `spiderHelpers.js`; alertas vão ao Slack com o tipo de bloqueio.
+- **Raspagem avulsa** (`looseScrape.js`) — modo de diagnóstico que ordena resultados por proximidade e envia relatório completo ao Slack, sem gravar no banco.
 - **Agendamento systemd** — timer às 10h + catch-up no boot; mais confiável que cron em máquina pessoal que pode estar desligada.
 
 ---
@@ -36,9 +38,11 @@ O runtime já oferece `fetch` nativo (baseado em undici) a partir da v18, elimin
 | Módulo | Responsabilidade |
 |--------|------------------|
 | **Spiders** (`jcConcursos`, `pciConcursos`) | Raspagem de sites de concursos, filtro geográfico e validação de links |
+| **Spider helpers** (`spiderHelpers.js`) | Fetch seguro, detecção de bloqueio (`BloqueioFonteError`) e normalização dos registros |
 | **Banco SQLite + Knex** (`db.js`) | Persistência via query builder, controle de execução diária e lock contra corridas |
-| **Slack** (`slack.js`) | Notificação de concursos inéditos, bloqueios nas fontes e cobertura vazia |
-| **Geo filter** (`geoFilter.js`) | Cidades-alvo, normalização de texto e fuso horário |
+| **Slack** (`slack.js`) | Notificação de concursos inéditos, bloqueios, cobertura vazia e raspagem avulsa |
+| **Geo filter** (`geoFilter.js`) | Cidades-alvo, detecção de escolaridade, headers HTTP, normalização de texto e fuso horário |
+| **Raspagem avulsa** (`looseScrape.js`) | Ordenação por proximidade e diagnóstico de falhas para o modo `--run-loose` |
 | **Segurança** (`security.js`, `httpClient.js`) | Whitelist de domínios, sanitização e limites HTTP |
 | **Agendamento** (systemd) | Execução diária às 10h + catch-up no boot |
 
@@ -46,11 +50,23 @@ O runtime já oferece `fetch` nativo (baseado em undici) a partir da v18, elimin
 
 1. **Raspagem diária** — consulta PCI Concursos (Sudeste) e JC Concursos em busca de vagas em SP.
 2. **Filtro geográfico** — mantém apenas concursos de cidades num raio de ~100 km de Capivari.
-3. **Deduplicação** — remove duplicatas pelo link do concurso.
-4. **Persistência** — grava/atualiza registros em `data/concursos.db`.
-5. **Notificação seletiva** — envia ao Slack concursos novos, alertas de bloqueio (captcha, Cloudflare, etc.) e aviso quando nenhum concurso é encontrado.
-6. **Controle de execução** — impede mais de uma raspagem bem-sucedida por dia; lock com expiração de 30 min.
-7. **Catch-up no boot** — se o PC ligar após as 10h e a raspagem do dia não rodou, executa automaticamente.
+3. **Detecção de escolaridade** — infere o nível (fundamental, médio, técnico, superior) a partir do texto do edital.
+4. **Deduplicação** — remove duplicatas pelo link do concurso.
+5. **Persistência** — grava/atualiza registros em `data/concursos.db`.
+6. **Notificação seletiva** — envia ao Slack concursos novos, alertas de bloqueio (captcha, Cloudflare, etc.) e aviso quando nenhum concurso é encontrado.
+7. **Controle de execução** — impede mais de uma raspagem bem-sucedida por dia; lock com expiração de 30 min.
+8. **Catch-up no boot** — se o PC ligar após as 10h e a raspagem do dia não rodou, executa automaticamente.
+
+### Raspagem avulsa (`--run-loose`)
+
+Modo de diagnóstico manual, distinto da raspagem diária:
+
+| Aspecto | Raspagem diária | Raspagem avulsa |
+|---------|-----------------|-----------------|
+| Lock diário | Respeita | Ignora |
+| Persistência no SQLite | Sim | Não |
+| Notificação Slack | Somente concursos **novos** | **Todos** os encontrados + diagnóstico |
+| Ordenação | Por ordem de coleta | Por proximidade a Capivari e escolaridade |
 
 ---
 
@@ -68,6 +84,10 @@ Auditoria focada em vetores que poderiam comprometer o computador local (SSRF, i
 ## Arquitetura
 
 ```
+index.js                   # Re-export de src/index.js (compatibilidade)
+scripts/
+├── install-cron.sh        # Instala units systemd (npm run cron:install)
+└── limpar-banco.js        # Limpa concursos e cron_runs (npm run db:clear)
 src/
 ├── cli.js                 # Ponto de entrada (systemd / npm start)
 ├── index.js               # Orquestrador principal
@@ -83,7 +103,10 @@ src/
 └── utils/
     ├── geoFilter.js
     ├── httpClient.js
-    └── security.js
+    ├── looseScrape.js
+    ├── security.js
+    └── spiderHelpers.js
+systemd/                   # Templates das units user (timer, service, catch-up)
 ```
 
 ---
@@ -96,6 +119,11 @@ flowchart TD
 
     B -->|--list-today| C[Listar concursos do dia no banco]
     C --> Z([Fim])
+
+    B -->|--run-loose| RL[Coletar spiders sem lock/DB]
+    RL --> RLO[Ordenar por proximidade]
+    RLO --> RLN[Notificar Slack avulsa + diagnóstico]
+    RLN --> Z
 
     B -->|--catch-up| D{Já executou hoje?}
     D -->|Sim| Z
@@ -114,8 +142,10 @@ flowchart TD
     J -->|Não| K[Log: em andamento]
     K --> Z
 
-    J -->|Sim| L[Para cada spider]
+    J -->|Sim| L[Para cada spider em sequência]
     L --> M{Raspagem OK?}
+    M -->|Bloqueio| NB[Notificar bloqueio no Slack]
+    NB --> L
     M -->|Erro parcial| N[Registrar erro do spider]
     N --> L
     M -->|OK| O[Acumular resultados]
@@ -130,8 +160,11 @@ flowchart TD
     S --> T[Identificar concursos novos]
     T --> U[Registrar execução success]
     U --> V[Exibir tabela no console]
-    V --> W{Há novos?}
-    W -->|Sim| X[Notificar Slack]
+    V --> CV{Resultado vazio?}
+    CV -->|Sim| CVN[Notificar cobertura vazia]
+    CVN --> W{Há novos?}
+    CV -->|Não| W
+    W -->|Sim| X[Notificar concursos novos]
     W -->|Não| Z
     X --> Z
 ```
@@ -159,6 +192,14 @@ sequenceDiagram
         IDX->>DB: listarConcursosRecentes(hoje)
         DB-->>IDX: concursos[]
         IDX->>IDX: exibirResultados()
+    else --run-loose
+        IDX->>JC: scrape()
+        JC-->>IDX: concursos[]
+        IDX->>PCI: scrape()
+        PCI-->>IDX: concursos[]
+        IDX->>IDX: ordenarConcursosAvulsa()
+        IDX->>SL: notificarRaspagemAvulsa()
+        SL-->>IDX: 200 OK
     else execução normal
         IDX->>DB: jaExecutouHoje(hoje)?
         DB-->>IDX: false
@@ -166,12 +207,15 @@ sequenceDiagram
         IDX->>DB: reservarExecucao(hoje)
         DB-->>IDX: true (lock adquirido)
 
-        par Spiders em sequência
-            IDX->>JC: scrape()
-            JC-->>IDX: concursos[]
-        and
-            IDX->>PCI: scrape()
-            PCI-->>IDX: concursos[]
+        IDX->>JC: scrape()
+        JC-->>IDX: concursos[]
+
+        IDX->>PCI: scrape()
+        PCI-->>IDX: concursos[]
+
+        opt bloqueio detectado
+            IDX->>SL: notificarBloqueio()
+            SL-->>IDX: 200 OK
         end
 
         IDX->>IDX: deduplicarPorLink()
@@ -180,6 +224,11 @@ sequenceDiagram
 
         IDX->>DB: registrarExecucao(success)
         IDX->>IDX: exibirResultados()
+
+        opt resultado vazio
+            IDX->>SL: notificarCoberturaVazia()
+            SL-->>IDX: 200 OK
+        end
 
         opt novos.length > 0
             IDX->>SL: notificarConcursos(novos)
@@ -210,7 +259,11 @@ npm install
 
 ### 3. Configuração
 
-Crie o arquivo `.env` na raiz do projeto:
+Copie `.env.example` para `.env` e ajuste os valores:
+
+```bash
+cp .env.example .env
+```
 
 ```env
 SLACK_WEBHOOK_URL=https://hooks.slack.com/services/T00/B00/xxxxxxxxxxxxxxxxxxxxxxxx
@@ -233,6 +286,12 @@ node src/cli.js --list-today
 
 # Verificar catch-up (boot)
 node src/cli.js --catch-up
+
+# Raspagem avulsa — diagnóstico sem gravar no banco
+npm run run:loose
+
+# Limpar todos os registros do banco (requer confirmação)
+npm run db:clear -- --yes
 ```
 
 ### 5. Agendamento automático (systemd)
@@ -268,9 +327,11 @@ A suíte Jest cobre **100%** de statements, branches, functions e lines. Relató
 
 | Comando | Descrição |
 |---------|-----------|
-| `npm start` | Executa raspagem (via `src/cli.js`) |
+| `npm start` | Executa raspagem diária (via `src/cli.js`) |
 | `npm run run-once` | Alias de `npm start` |
+| `npm run run:loose` | Raspagem avulsa — sem lock, sem persistência, notifica tudo no Slack |
 | `npm run cron:install` | Instala units systemd user |
+| `npm run db:clear -- --yes` | Remove todos os registros de `concursos` e `cron_runs` |
 | `npm test` | Testes com cobertura |
 | `npm run test:watch` | Testes em modo watch |
 
