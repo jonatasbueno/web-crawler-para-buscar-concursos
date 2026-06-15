@@ -25,10 +25,16 @@ export function validarTimezone(timezone) {
   }
 }
 
+export function lerSlackWebhookUrl() {
+  const url = process.env.SLACK_WEBHOOK_URL;
+  return typeof url === 'string' ? url : '';
+}
+
 export function carregarEnv(envPath = path.join(__dirname, '../../.env')) {
   dotenv.config({ path: envPath, quiet: true, override: true });
   return {
-    TIMEZONE: validarTimezone(process.env.TIMEZONE ?? DEFAULT_TIMEZONE)
+    TIMEZONE: validarTimezone(process.env.TIMEZONE ?? DEFAULT_TIMEZONE),
+    SLACK_WEBHOOK_URL: lerSlackWebhookUrl()
   };
 }
 

@@ -25,9 +25,12 @@ const PROTOCOLOS_PERIGOSOS = /^(javascript|data|vbscript):/i;
 function parseHttpsUrl(url) {
   if (typeof url !== 'string' || !url.trim()) return null;
 
+  const urlLimpa = url.trim();
+
   let parsed;
+
   try {
-    parsed = new URL(url.trim());
+    parsed = new URL(urlLimpa);
   } catch {
     return null;
   }
@@ -38,17 +41,9 @@ function parseHttpsUrl(url) {
   return parsed;
 }
 
-function pertenceWhitelist(url) {
+export function pertenceWhitelist(url) {
   const parsed = parseHttpsUrl(url);
   return parsed ? ALLOWED_HOSTS.has(parsed.hostname) : false;
-}
-
-export function isAllowedFetchUrl(url) {
-  return pertenceWhitelist(url);
-}
-
-export function isAllowedLinkUrl(url) {
-  return pertenceWhitelist(url);
 }
 
 export function validateSlackWebhook(url) {
@@ -79,7 +74,7 @@ export function normalizarLinkSeguro(href, baseOrigin) {
   if (PROTOCOLOS_PERIGOSOS.test(trimmed)) return null;
 
   const absoluto = resolverUrlAbsoluta(trimmed, baseOrigin);
-  return isAllowedLinkUrl(absoluto) ? absoluto : null;
+  return pertenceWhitelist(absoluto) ? absoluto : null;
 }
 
 function resolverUrlAbsoluta(href, baseOrigin) {

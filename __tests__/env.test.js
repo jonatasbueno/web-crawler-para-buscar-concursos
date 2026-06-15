@@ -33,6 +33,14 @@ describe('env', () => {
     expect(env.TIMEZONE).toBe('America/Manaus');
   });
 
+  it('carrega SLACK_WEBHOOK_URL do ambiente', () => {
+    const envPath = path.join(tempDir, '.env');
+    fs.writeFileSync(envPath, 'SLACK_WEBHOOK_URL=https://hooks.slack.com/services/T/B/x\n');
+
+    const env = carregarEnv(envPath);
+    expect(env.SLACK_WEBHOOK_URL).toContain('hooks.slack.com');
+  });
+
   it('carrega env padrão do projeto', () => {
     const env = carregarEnv();
     expect(env.TIMEZONE).toBeTruthy();

@@ -1,7 +1,7 @@
 import { describe, it, expect, jest } from '@jest/globals';
 
 jest.unstable_mockModule('../src/utils/security.js', () => ({
-  isAllowedFetchUrl: () => false,
+  pertenceWhitelist: () => false,
   normalizarLinkSeguro: () => null,
   truncarTexto: (t) => String(t ?? '')
 }));

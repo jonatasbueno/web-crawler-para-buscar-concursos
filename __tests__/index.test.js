@@ -1,10 +1,18 @@
 import { describe, it, expect, beforeEach, afterEach, jest } from '@jest/globals';
+import { BloqueioFonteError } from '../src/utils/spiderHelpers.js';
 
 const postMock = jest.fn().mockResolvedValue({ status: 200 });
 const getMock = jest.fn();
 
 jest.unstable_mockModule('axios', () => ({
-  default: { post: postMock }
+  default: {
+    create: jest.fn(() => ({ post: postMock })),
+    isAxiosError: (error) => Boolean(error?.isAxiosError)
+  }
+}));
+
+jest.unstable_mockModule('node:https', () => ({
+  default: { Agent: jest.fn() }
 }));
 
 jest.unstable_mockModule('../src/utils/httpClient.js', () => ({
@@ -40,6 +48,16 @@ const spiderFail = {
   scrape: jest.fn().mockRejectedValue(new Error('falha'))
 };
 
+const spiderBloqueado = {
+  name: 'blockedSpider',
+  scrape: jest.fn().mockRejectedValue(new BloqueioFonteError('blockedSpider', 'reCAPTCHA'))
+};
+
+const spiderVazio = {
+  name: 'emptySpider',
+  scrape: jest.fn().mockResolvedValue([])
+};
+
 describe('index', () => {
   beforeEach(async () => {
     jest.spyOn(console, 'log').mockImplementation(() => {});
@@ -47,11 +65,13 @@ describe('index', () => {
     jest.spyOn(console, 'error').mockImplementation(() => {});
     postMock.mockClear();
     getMock.mockReset();
-    getMock.mockResolvedValue({ data: HTML_PCI });
+    getMock.mockResolvedValue(HTML_PCI);
     process.env.SLACK_WEBHOOK_URL = 'https://hooks.slack.com/services/T00/B00/xxxxxxxxxxxxxxxxxxxxxxxx';
     await db.resetDb({ path: ':memory:' });
     spiderOk.scrape.mockClear();
     spiderFail.scrape.mockClear();
+    spiderBloqueado.scrape.mockClear();
+    spiderVazio.scrape.mockClear();
   });
 
   afterEach(async () => {
@@ -121,6 +141,17 @@ describe('index', () => {
     await db.reservarExecucao(runDate);
     const resultado = await index.executarRaspagem('teste', [spiderOk]);
     expect(resultado).toEqual([]);
+  });
+
+  it('notifica bloqueio e cobertura vazia', async () => {
+    await index.executarRaspagem('teste', [spiderBloqueado, spiderVazio]);
+    expect(postMock.mock.calls.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('notifica cobertura vazia sem concursos', async () => {
+    await index.executarRaspagem('teste', [spiderVazio]);
+    const payloads = postMock.mock.calls.map((call) => call[1]);
+    expect(payloads.some((p) => p.blocks[0].text.text.includes('Cobertura vazia'))).toBe(true);
   });
 
   it('registra erro quando todos os spiders falham', async () => {

@@ -37,7 +37,7 @@ const HTML_JC = `
 describe('jcConcursos spider', () => {
   beforeEach(() => {
     getMock.mockReset();
-    getMock.mockResolvedValue({ data: HTML_JC });
+    getMock.mockResolvedValue(HTML_JC);
   });
 
   it('extrai concursos válidos e ignora links maliciosos', async () => {

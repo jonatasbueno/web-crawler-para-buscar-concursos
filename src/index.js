@@ -8,7 +8,12 @@ import {
   upsertConcursos,
   listarConcursosRecentes
 } from './database/db.js';
-import { notificarConcursos } from './services/slack.js';
+import {
+  notificarConcursos,
+  notificarBloqueio,
+  notificarCoberturaVazia
+} from './services/slack.js';
+import { BloqueioFonteError } from './utils/spiderHelpers.js';
 import jcConcursos from './spiders/jcConcursos.js';
 import pciConcursos from './spiders/pciConcursos.js';
 import { hojeLocal, horaLocal } from './utils/geoFilter.js';
@@ -31,17 +36,23 @@ export function deduplicarPorLink(concursos) {
 async function coletarConcursos(spiders) {
   const concursos = [];
   const falhas = [];
+  const bloqueios = [];
 
   for (const spider of spiders) {
     try {
       concursos.push(...await spider.scrape());
     } catch (error) {
-      falhas.push(`${spider.name}: ${error.message}`);
+      if (error instanceof BloqueioFonteError) {
+        bloqueios.push({ fonte: error.fonte, tipo: error.tipo });
+      } else {
+        falhas.push(`${spider.name}: ${error.message}`);
+      }
+
       console.error(`[${spider.name}] Falha:`, error.message);
     }
   }
 
-  return { concursos, falhas };
+  return { concursos, falhas, bloqueios };
 }
 
 export async function executarRaspagem(motivo = 'manual', spiders = SPIDERS) {
@@ -60,9 +71,13 @@ export async function executarRaspagem(motivo = 'manual', spiders = SPIDERS) {
   console.log(`[${motivo}] Iniciando raspagem diária (${runDate})...`);
 
   try {
-    const { concursos, falhas } = await coletarConcursos(spiders);
+    const { concursos, falhas, bloqueios } = await coletarConcursos(spiders);
 
-    if (falhas.length === spiders.length) {
+    for (const bloqueio of bloqueios) {
+      await notificarBloqueio(bloqueio.fonte, bloqueio.tipo, runDate);
+    }
+
+    if (falhas.length === spiders.length && bloqueios.length === 0) {
       throw new Error(falhas.join(' | '));
     }
 
@@ -73,6 +88,11 @@ export async function executarRaspagem(motivo = 'manual', spiders = SPIDERS) {
     exibirResultados(unicos);
 
     console.log(`[${motivo}] ${novos.length} concurso(s) novo(s) de ${unicos.length} encontrado(s).`);
+
+    if (unicos.length === 0) {
+      await notificarCoberturaVazia(runDate);
+    }
+
     await notificarConcursos(novos, runDate);
 
     return unicos;

@@ -48,7 +48,7 @@ const HTML_PCI = `
 describe('pciConcursos spider', () => {
   beforeEach(() => {
     getMock.mockReset();
-    getMock.mockResolvedValue({ data: HTML_PCI });
+    getMock.mockResolvedValue(HTML_PCI);
   });
 
   it('extrai concursos de SP e rejeita links inválidos', async () => {

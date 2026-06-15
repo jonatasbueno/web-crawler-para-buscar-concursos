@@ -1,6 +1,33 @@
 # Crawler de Concursos Públicos
 
-Crawler modular em Node.js que monitora concursos públicos com inscrições abertas na região de **Capivari-SP** (raio de ~100 km). Os resultados são persistidos em SQLite via **Knex.js** e notificados no Slack apenas quando há concursos **novos**.
+Crawler modular em Node.js que monitora concursos públicos com inscrições abertas na região de **Capivari-SP** (raio de ~100 km). Os resultados são persistidos em SQLite via **Knex.js** e notificados no Slack quando há concursos **novos**, **bloqueios nas fontes** ou **cobertura vazia**.
+
+---
+
+## Decisões técnicas
+
+### Por que Node.js?
+
+O runtime já oferece `fetch` nativo (baseado em undici) a partir da v18, eliminando dependências HTTP extras para as raspagens recorrentes. A execução via CLI encaixa bem com agendamento por systemd, sem precisar de servidor web nem container.
+
+### Bibliotecas e abordagens
+
+| Escolha | Motivo |
+|---------|--------|
+| **fetch nativo** (`httpClient.js`) | Cliente reutilizável dos spiders; raspagens diárias na mesma fonte se beneficiam de uma API simples e estável, sem axios. |
+| **axios** (`slack.js`) | Webhook do Slack é requisição pontual (não recorrente); cliente com `httpsAgent` e `keepAlive: false` evita manter conexão aberta desnecessariamente. |
+| **Cheerio** | Parsing de HTML server-side leve — extrai seletores CSS sem headless browser, reduzindo memória e superfície de ataque. |
+| **Knex + SQLite** | Persistência local sem servidor de banco; query builder tipado facilita migrações e testes com `:memory:`. Adequado para volume baixo (dezenas de registros/dia). |
+| **dotenv** | Configuração via `.env` sem expor segredos no código; carregamento centralizado em `env.js`. |
+| **Jest** | Testes unitários com cobertura total; `unstable_mockModule` permite mockar ESM nativo. |
+
+### Arquitetura modular
+
+- **Spiders independentes** — cada fonte (`jcConcursos`, `pciConcursos`) é um módulo com interface `{ name, scrape }`. Falha em uma fonte não aborta a outra.
+- **Orquestrador** (`index.js`) — deduplica, persiste, decide notificações e controla execução diária.
+- **Camada de segurança** — whitelist de domínios (`pertenceWhitelist`) bloqueia SSRF antes de qualquer fetch; links extraídos passam por `normalizarLinkSeguro`.
+- **Detecção de bloqueios** — HTML das fontes é inspecionado por padrões de captcha/Cloudflare; alertas vão ao Slack com o tipo de bloqueio.
+- **Agendamento systemd** — timer às 10h + catch-up no boot; mais confiável que cron em máquina pessoal que pode estar desligada.
 
 ---
 
@@ -10,7 +37,7 @@ Crawler modular em Node.js que monitora concursos públicos com inscrições abe
 |--------|------------------|
 | **Spiders** (`jcConcursos`, `pciConcursos`) | Raspagem de sites de concursos, filtro geográfico e validação de links |
 | **Banco SQLite + Knex** (`db.js`) | Persistência via query builder, controle de execução diária e lock contra corridas |
-| **Slack** (`slack.js`) | Notificação formatada apenas de concursos inéditos |
+| **Slack** (`slack.js`) | Notificação de concursos inéditos, bloqueios nas fontes e cobertura vazia |
 | **Geo filter** (`geoFilter.js`) | Cidades-alvo, normalização de texto e fuso horário |
 | **Segurança** (`security.js`, `httpClient.js`) | Whitelist de domínios, sanitização e limites HTTP |
 | **Agendamento** (systemd) | Execução diária às 10h + catch-up no boot |
@@ -21,7 +48,7 @@ Crawler modular em Node.js que monitora concursos públicos com inscrições abe
 2. **Filtro geográfico** — mantém apenas concursos de cidades num raio de ~100 km de Capivari.
 3. **Deduplicação** — remove duplicatas pelo link do concurso.
 4. **Persistência** — grava/atualiza registros em `data/concursos.db`.
-5. **Notificação seletiva** — envia ao Slack somente concursos que ainda não existiam no banco.
+5. **Notificação seletiva** — envia ao Slack concursos novos, alertas de bloqueio (captcha, Cloudflare, etc.) e aviso quando nenhum concurso é encontrado.
 6. **Controle de execução** — impede mais de uma raspagem bem-sucedida por dia; lock com expiração de 30 min.
 7. **Catch-up no boot** — se o PC ligar após as 10h e a raspagem do dia não rodou, executa automaticamente.
 
@@ -30,19 +57,6 @@ Crawler modular em Node.js que monitora concursos públicos com inscrições abe
 ## Segurança
 
 Auditoria focada em vetores que poderiam comprometer o computador local (SSRF, injeção, execução arbitrária, path traversal).
-
-### Vulnerabilidades identificadas e mitigadas
-
-| Risco | Vetor original | Proteção aplicada |
-|-------|----------------|-------------------|
-| **SSRF** | URLs arbitrárias em requisições HTTP | Whitelist de domínios em `security.js`; guard no `httpClient.js` bloqueia hosts fora da lista |
-| **Open redirect / links maliciosos** | `javascript:`, `data:`, domínios externos nos spiders | `normalizarLinkSeguro()` rejeita protocolos perigosos; só aceita HTTPS de domínios permitidos |
-| **Injeção no Slack** | Texto raspado enviado ao webhook | `sanitizeSlackText()` escapa `&`, `<`, `>`; truncamento de campos |
-| **Webhook arbitrário** | `SLACK_WEBHOOK_URL` malformada ou apontando para servidor interno | Validação por regex estrita (`hooks.slack.com/services/...`) |
-| **Path traversal no cron** | `PROJECT_DIR` com `\|` ou newline no script de instalação | Validação em `install-cron.sh` |
-| **Corrida de execução** | Múltiplas instâncias simultâneas corrompendo estado | `reservarExecucao()` com status `running` e lock expirável |
-| **Respostas HTTP enormes** | DoS por payload gigante | Limite de tamanho, timeout e redirects no `httpClient.js` |
-| **Credenciais em URL** | `https://user:pass@host` | Rejeitado em `parseHttpsUrl()` |
 
 ### Domínios permitidos
 

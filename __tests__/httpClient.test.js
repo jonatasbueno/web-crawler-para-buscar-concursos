@@ -1,52 +1,106 @@
 import { describe, it, expect, jest } from '@jest/globals';
 
-const createMock = jest.fn(() => ({
-  interceptors: { request: { use: jest.fn() } },
-  get: jest.fn()
-}));
+const fetchMock = jest.fn();
 
-jest.unstable_mockModule('axios', () => ({
-  default: { create: createMock }
-}));
+global.fetch = fetchMock;
 
-const { createHttpClient, validateRequestConfig, attachRequestGuard } = await import('../src/utils/httpClient.js');
+const { createHttpClient, validarUrlFetch, fetchComLimites } = await import('../src/utils/httpClient.js');
+
+function mockResponse({ status = 200, body = '<html></html>', headers = {} } = {}) {
+  return {
+    status,
+    headers: {
+      get: (name) => headers[name.toLowerCase()] ?? null
+    },
+    arrayBuffer: async () => new TextEncoder().encode(body).buffer
+  };
+}
 
 describe('httpClient', () => {
-  it('registra guard no cliente', () => {
-    const useMock = jest.fn();
-    const client = attachRequestGuard({
-      interceptors: { request: { use: useMock } }
-    });
-
-    expect(useMock).toHaveBeenCalled();
-    const guard = useMock.mock.calls[0][0];
-    expect(guard({ url: 'https://jcconcursos.com.br/x' }).url).toContain('jcconcursos');
-    expect(client.interceptors).toBeDefined();
+  beforeEach(() => {
+    fetchMock.mockReset();
+    fetchMock.mockResolvedValue(mockResponse());
   });
 
-  it('cria cliente HTTP configurado', () => {
+  it('cria cliente HTTP com método get', async () => {
     const client = createHttpClient();
-    const options = createMock.mock.calls[0][0];
-    expect(options.validateStatus(200)).toBe(true);
-    expect(options.validateStatus(400)).toBe(false);
-    expect(createMock).toHaveBeenCalled();
-    expect(client.interceptors).toBeDefined();
+    const html = await client.get('https://jcconcursos.com.br/concursos/sp');
+    expect(html).toBe('<html></html>');
+    expect(fetchMock).toHaveBeenCalled();
+    const [, options] = fetchMock.mock.calls[0];
+    expect(options.method).toBe('GET');
   });
 
-  it('rejeita configuração sem URL válida', () => {
-    expect(() => validateRequestConfig({})).toThrow('URL não permitida');
+  it('rejeita URL não permitida', () => {
+    expect(() => validarUrlFetch('https://evil.com/x')).toThrow('URL não permitida');
   });
 
-  it('aceita configuração com URL absoluta permitida', () => {
-    const config = validateRequestConfig({ url: 'https://jcconcursos.com.br/concursos/sp' });
-    expect(config.url).toContain('jcconcursos');
+  it('aceita URL absoluta permitida', () => {
+    expect(validarUrlFetch('https://jcconcursos.com.br/concursos/sp')).toContain('jcconcursos');
   });
 
-  it('monta URL relativa com baseURL permitida', () => {
-    const config = validateRequestConfig({
-      baseURL: 'https://jcconcursos.com.br',
-      url: '/concursos/sp'
+  it('segue redirect validado', async () => {
+    fetchMock
+      .mockResolvedValueOnce(mockResponse({ status: 302, headers: { location: '/concursos/sp' } }))
+      .mockResolvedValueOnce(mockResponse({ body: '<html>ok</html>' }));
+
+    const client = createHttpClient();
+    const html = await client.get('https://jcconcursos.com.br/');
+    expect(html).toBe('<html>ok</html>');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('rejeita resposta HTTP de erro', async () => {
+    fetchMock.mockResolvedValue(mockResponse({ status: 500 }));
+    const client = createHttpClient();
+    await expect(client.get('https://jcconcursos.com.br/x')).rejects.toThrow('HTTP 500');
+  });
+
+  it('rejeita corpo acima do limite', async () => {
+    const huge = 'x'.repeat(5 * 1024 * 1024 + 1);
+    fetchMock.mockResolvedValue(mockResponse({ body: huge }));
+    const client = createHttpClient();
+    await expect(client.get('https://jcconcursos.com.br/x')).rejects.toThrow('tamanho máximo');
+  });
+
+  it('rejeita excesso de redirects', async () => {
+    fetchMock.mockResolvedValue(mockResponse({ status: 302, headers: { location: '/loop' } }));
+    const client = createHttpClient();
+    await expect(client.get('https://jcconcursos.com.br/')).rejects.toThrow('Muitos redirects');
+  });
+
+  it('rejeita redirect sem Location', async () => {
+    fetchMock.mockResolvedValue(mockResponse({ status: 302 }));
+    const client = createHttpClient();
+    await expect(client.get('https://jcconcursos.com.br/')).rejects.toThrow('Redirect sem header');
+  });
+
+  it('aceita fetch sem options explícitas', async () => {
+    fetchMock.mockResolvedValue(mockResponse());
+    const html = await fetchComLimites('https://jcconcursos.com.br/x');
+    expect(html).toBe('<html></html>');
+  });
+
+  it('propaga erro genérico de rede', async () => {
+    fetchMock.mockRejectedValue(new Error('falha de rede'));
+    const client = createHttpClient();
+    await expect(client.get('https://jcconcursos.com.br/x')).rejects.toThrow('falha de rede');
+  });
+
+  it('rejeita timeout', async () => {
+    fetchMock.mockRejectedValue(Object.assign(new Error('aborted'), { name: 'AbortError' }));
+    const client = createHttpClient();
+    await expect(client.get('https://jcconcursos.com.br/x')).rejects.toThrow('Timeout');
+  });
+
+  it('executa callback de timeout', async () => {
+    const setTimeoutSpy = jest.spyOn(global, 'setTimeout').mockImplementation((cb) => {
+      cb();
+      return 1;
     });
-    expect(config.baseURL).toBe('https://jcconcursos.com.br');
+    fetchMock.mockRejectedValue(Object.assign(new Error('aborted'), { name: 'AbortError' }));
+
+    await expect(createHttpClient().get('https://jcconcursos.com.br/x')).rejects.toThrow('Timeout');
+    setTimeoutSpy.mockRestore();
   });
 });

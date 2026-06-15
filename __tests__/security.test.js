@@ -1,7 +1,6 @@
 import { describe, it, expect } from '@jest/globals';
 import {
-  isAllowedFetchUrl,
-  isAllowedLinkUrl,
+  pertenceWhitelist,
   validateSlackWebhook,
   truncarTexto,
   sanitizeSlackText,
@@ -9,22 +8,19 @@ import {
 } from '../src/utils/security.js';
 
 describe('security', () => {
-  it('valida URLs de fetch permitidas', () => {
-    expect(isAllowedFetchUrl('ht!tp://bad')).toBe(false);
-    expect(isAllowedFetchUrl('https://jcconcursos.com.br/concursos/sp')).toBe(true);
-    expect(isAllowedFetchUrl('https://www.pciconcursos.com.br/concursos/sudeste')).toBe(true);
-    expect(isAllowedFetchUrl('http://jcconcursos.com.br/x')).toBe(false);
-    expect(isAllowedFetchUrl('https://evil.com/x')).toBe(false);
-    expect(isAllowedFetchUrl('file:///etc/passwd')).toBe(false);
-    expect(isAllowedFetchUrl('')).toBe(false);
-    expect(isAllowedFetchUrl(null)).toBe(false);
-    expect(isAllowedFetchUrl('https://user:pass@jcconcursos.com.br/x')).toBe(false);
-  });
-
-  it('valida links permitidos', () => {
-    expect(isAllowedLinkUrl('https://www.pciconcursos.com.br/noticias/x')).toBe(true);
-    expect(isAllowedLinkUrl('https://localhost/x')).toBe(false);
-    expect(isAllowedLinkUrl('invalido')).toBe(false);
+  it('valida URLs permitidas na whitelist', () => {
+    expect(pertenceWhitelist('ht!tp://bad')).toBe(false);
+    expect(pertenceWhitelist('https://jcconcursos.com.br/concursos/sp')).toBe(true);
+    expect(pertenceWhitelist('https://www.pciconcursos.com.br/concursos/sudeste')).toBe(true);
+    expect(pertenceWhitelist('http://jcconcursos.com.br/x')).toBe(false);
+    expect(pertenceWhitelist('https://evil.com/x')).toBe(false);
+    expect(pertenceWhitelist('file:///etc/passwd')).toBe(false);
+    expect(pertenceWhitelist('')).toBe(false);
+    expect(pertenceWhitelist(null)).toBe(false);
+    expect(pertenceWhitelist('https://user:pass@jcconcursos.com.br/x')).toBe(false);
+    expect(pertenceWhitelist('https://www.pciconcursos.com.br/noticias/x')).toBe(true);
+    expect(pertenceWhitelist('https://localhost/x')).toBe(false);
+    expect(pertenceWhitelist('invalido')).toBe(false);
   });
 
   it('valida webhook do Slack', () => {
