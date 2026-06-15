@@ -103,7 +103,7 @@ function criarBlocoConcurso(concurso) {
       type: 'mrkdwn',
       text: [
         `*${sanitizeSlackText(concurso.cidade)}* — ${sanitizeSlackText(concurso.orgao)}`,
-        `${sanitizeSlackText(concurso.escolaridade)} | ${sanitizeSlackText(concurso.fonte)}`,
+        `${sanitizeSlackText(concurso.escolaridade)} | ${abreviarFonte(concurso.fonte)}`,
         linkTexto
       ].join('\n')
     }

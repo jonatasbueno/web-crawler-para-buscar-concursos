@@ -75,6 +75,7 @@ describe('slack', () => {
     expect(postMock).toHaveBeenCalledTimes(1);
     const payload = postMock.mock.calls[0][1];
     expect(payload.blocks[2].text.text).toContain('&lt;Teste&gt;');
+    expect(payload.blocks[2].text.text).toContain('PCI Concursos');
     expect(logSpy).toHaveBeenCalledWith('[slack] Notificação enviada (1 concursos).');
     logSpy.mockRestore();
   });

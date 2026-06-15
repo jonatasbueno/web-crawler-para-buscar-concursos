@@ -14,12 +14,18 @@ const FONTE = 'jcConcursos';
 
 const http = createHttpClient();
 
+function extrairTitulo($item) {
+  const $titulo = $item.find('h2.preview_text').first().clone();
+  $titulo.find('.badge').remove();
+  return truncarTexto($titulo.text().trim());
+}
+
 function extrairConcursos($) {
   const resultados = [];
 
   $('.row.border-bottom.py-3').each((_, elemento) => {
     const $item = $(elemento);
-    const titulo = truncarTexto($item.find('h2.preview_text').text().trim());
+    const titulo = extrairTitulo($item);
     const href = $item.find('a[href^="/concurso/"]').first().attr('href');
 
     if (!titulo || !href) return;

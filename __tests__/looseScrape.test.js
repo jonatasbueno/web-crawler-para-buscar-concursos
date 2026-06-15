@@ -16,9 +16,9 @@ const concurso = (overrides) => ({
 });
 
 describe('looseScrape', () => {
-  it('abrevia fontes', () => {
-    expect(abreviarFonte('jcConcursos')).toBe('JC');
-    expect(abreviarFonte('pciConcursos')).toBe('PCI');
+  it('formata nomes de fonte para exibição', () => {
+    expect(abreviarFonte('jcConcursos')).toBe('JC Concursos');
+    expect(abreviarFonte('pciConcursos')).toBe('PCI Concursos');
     expect(abreviarFonte('outra')).toBe('outra');
   });
 

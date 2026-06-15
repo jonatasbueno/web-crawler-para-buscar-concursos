@@ -26,8 +26,8 @@ export const ORDEM_PROXIMIDADE = new Map([
 ]);
 
 export function abreviarFonte(fonte) {
-  if (fonte === 'jcConcursos') return 'JC';
-  if (fonte === 'pciConcursos') return 'PCI';
+  if (fonte === 'jcConcursos') return 'JC Concursos';
+  if (fonte === 'pciConcursos') return 'PCI Concursos';
   return fonte;
 }
 

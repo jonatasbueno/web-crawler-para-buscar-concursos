@@ -59,6 +59,8 @@ describe('jcConcursos spider', () => {
     const resultados = await jcConcursos.scrape();
     expect(resultados).toHaveLength(2);
     expect(resultados[0].cidade).toBe('PIRACICABA');
+    expect(resultados[0].orgao).toBe('Prefeitura de Piracicaba SP');
+    expect(resultados[0].orgao).not.toContain('Concurso Aberto');
     expect(resultados[0].link).toContain('jcconcursos.com.br');
     expect(resultados.some((item) => item.cidade === 'LIMEIRA')).toBe(true);
   });
