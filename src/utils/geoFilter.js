@@ -2,6 +2,7 @@ import { TIMEZONE } from '../config/env.js';
 
 export { TIMEZONE };
 
+/** Cidades num raio ~100 km de Capivari-SP (chaves normalizadas, sem acento). */
 export const CIDADES_ALVO = new Set([
   'capivari', 'piracicaba', 'campinas', 'sorocaba', 'indaiatuba',
   'americana', 'limeira', 'sumare', 'hortolandia', 'itu',
@@ -27,6 +28,7 @@ export const HTTP_HEADERS = {
   'Cache-Control': 'max-age=0'
 };
 
+/** Remove acentos e padroniza caixa para comparações de texto. */
 export function normalizarTexto(texto) {
   return String(texto ?? '')
     .toLowerCase()
@@ -35,6 +37,7 @@ export function normalizarTexto(texto) {
     .trim();
 }
 
+/** Data local no formato ISO (YYYY-MM-DD) respeitando TIMEZONE. */
 export function hojeLocal() {
   return new Intl.DateTimeFormat('en-CA', { timeZone: TIMEZONE }).format(new Date());
 }
@@ -47,19 +50,33 @@ export function horaLocal() {
   }).format(new Date()));
 }
 
+/**
+ * Identifica cidade-alvo no texto combinado dos campos do concurso.
+ *
+ * Cidades são testadas da maior para a menor para evitar match parcial
+ * (ex.: "campinas" antes de "campina"). O regex exige delimitadores
+ * ao redor do nome — evita falso positivo de "itu" dentro de "instituto".
+ */
 export function encontrarCidade(...textos) {
   const combinado = normalizarTexto(textos.filter(Boolean).join(' '));
   const cidadesOrdenadas = [...CIDADES_ALVO].sort((a, b) => b.length - a.length);
 
   return cidadesOrdenadas.find((cidade) => {
-    const padrao = cidade.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+');
-    return new RegExp(`(?:^|[\\s,.\\-/]|de\\s+)${padrao}(?:$|[\\s,.\\-/])`).test(combinado);
+    const padrao = escaparRegex(cidade).replace(/\s+/g, '\\s+');
+    const delimitador = `(?:^|[\\s,.\\-/]|de\\s+)`;
+    const regex = new RegExp(`${delimitador}${padrao}(?:$|[\\s,.\\-/])`);
+    return regex.test(combinado);
   }) ?? null;
+}
+
+function escaparRegex(texto) {
+  return texto.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 export function detectarEscolaridade(...textos) {
   const combinado = normalizarTexto(textos.filter(Boolean).join(' '));
   const nivel = ESCOLARIDADES_ALVO.find((item) => combinado.includes(item));
+
   return nivel
     ? nivel.charAt(0).toUpperCase() + nivel.slice(1)
     : 'Não especificado (Verificar edital)';

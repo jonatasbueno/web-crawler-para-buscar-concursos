@@ -1,47 +1,64 @@
-import axios from 'axios';
 import * as cheerio from 'cheerio';
 import {
-  HTTP_HEADERS,
   encontrarCidade,
   detectarEscolaridade
 } from '../utils/geoFilter.js';
+import { createHttpClient } from '../utils/httpClient.js';
+import { normalizarLinkSeguro, truncarTexto } from '../utils/security.js';
+import { buscarHtml, criarConcurso, logTotalEncontrado } from '../utils/spiderHelpers.js';
 
 const URL_FONTE = 'https://www.pciconcursos.com.br/concursos/sudeste';
+const BASE_ORIGIN = 'https://www.pciconcursos.com.br';
 const FONTE = 'pciConcursos';
 
-async function scrape() {
-  console.log(`[${FONTE}] Iniciando scraping em ${URL_FONTE}...`);
+const http = createHttpClient();
 
-  const { data: html } = await axios.get(URL_FONTE, { headers: HTTP_HEADERS });
-  const $ = cheerio.load(html);
+function formatarStatus(prazo) {
+  if (!prazo) return 'Inscrições Abertas';
+  return `Inscrições abertas (até ${prazo.replace(/\s+/g, ' ')})`;
+}
+
+function extrairConcursos($) {
   const resultados = [];
 
   $('.na').each((_, elemento) => {
     const $el = $(elemento);
+
+    // PCI lista concursos de vários estados — filtramos apenas SP
     if ($el.find('.cc').text().trim() !== 'SP') return;
 
-    const orgao = $el.find('.ca a').text().trim();
-    const titulo = $el.find('.ca a').attr('title') || orgao;
-    const link = $el.attr('data-url') || $el.find('.ca a').attr('href');
-    if (!orgao || !link) return;
+    const orgao = truncarTexto($el.find('.ca a').text().trim());
+    const titulo = truncarTexto($el.find('.ca a').attr('title') || orgao);
+    const href = $el.attr('data-url') || $el.find('.ca a').attr('href');
 
-    const infoTexto = $el.find('.cd').text().trim();
-    const prazo = $el.find('.ce').text().trim();
-    const cidadeEncontrada = encontrarCidade(titulo, orgao, link);
+    if (!orgao || !href) return;
 
-    if (!cidadeEncontrada) return;
+    const link = normalizarLinkSeguro(href, BASE_ORIGIN);
+    if (!link) return;
 
-    resultados.push({
+    const infoTexto = truncarTexto($el.find('.cd').text().trim());
+    const prazo = truncarTexto($el.find('.ce').text().trim());
+    const cidade = encontrarCidade(titulo, orgao, link);
+
+    if (!cidade) return;
+
+    resultados.push(criarConcurso({
       orgao,
-      cidade: cidadeEncontrada.toUpperCase(),
+      cidade,
       escolaridade: detectarEscolaridade(titulo, infoTexto),
-      status: prazo ? `Inscrições abertas (até ${prazo.replace(/\s+/g, ' ')})` : 'Inscrições Abertas',
+      status: formatarStatus(prazo),
       link,
       fonte: FONTE
-    });
+    }));
   });
 
-  console.log(`[${FONTE}] ${resultados.length} concursos encontrados.`);
+  return resultados;
+}
+
+async function scrape() {
+  const html = await buscarHtml(http, URL_FONTE, FONTE);
+  const resultados = extrairConcursos(cheerio.load(html));
+  logTotalEncontrado(FONTE, resultados.length);
   return resultados;
 }
 

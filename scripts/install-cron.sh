@@ -4,6 +4,11 @@ set -euo pipefail
 PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 SYSTEMD_USER_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 
+if [[ "$PROJECT_DIR" == *'|'* ]] || [[ "$PROJECT_DIR" == *$'\n'* ]]; then
+  echo "Caminho do projeto inválido para instalação do cron." >&2
+  exit 1
+fi
+
 mkdir -p "$SYSTEMD_USER_DIR" "$PROJECT_DIR/data"
 
 install_unit() {

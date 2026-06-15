@@ -1,1 +1,1 @@
-import './src/index.js';
+export { main, runCli, isEntryPoint } from './src/index.js';
