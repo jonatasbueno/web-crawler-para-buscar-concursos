@@ -134,6 +134,30 @@ function montarPayloadConcursos(concursos, runDate) {
   return { blocks: blocos };
 }
 
+function montarPayloadHomeOffice(concursos, runDate) {
+  const blocos = [
+    {
+      type: 'header',
+      text: {
+        type: 'plain_text',
+        text: `${concursos.length} nova(s) vaga(s) home office no Brasil (${runDate})`
+      }
+    },
+    { type: 'divider' },
+    ...concursos.slice(0, MAX_CONCURSOS_POR_MENSAGEM).map(criarBlocoConcurso)
+  ];
+
+  if (concursos.length > MAX_CONCURSOS_POR_MENSAGEM) {
+    const restantes = concursos.length - MAX_CONCURSOS_POR_MENSAGEM;
+    blocos.push({
+      type: 'context',
+      elements: [{ type: 'mrkdwn', text: `_+${restantes} vagas home office adicionais._` }]
+    });
+  }
+
+  return { blocks: blocos };
+}
+
 function montarPayloadAlerta(titulo, mensagem, runDate) {
   return {
     blocks: [
@@ -177,10 +201,22 @@ async function enviarWebhook(payload) {
   }
 }
 
-/** Envia ao Slack somente concursos inéditos — nunca re-notifica existentes. */
+/**
+ * Envia ao Slack os concursos inéditos da região (raio 100 km).
+ * Quando não há novidades, ainda assim confirma o resultado no Slack.
+ */
 export async function notificarConcursos(concursos, runDate) {
   if (concursos.length === 0) {
-    console.log('[slack] Nenhum concurso novo — notificação omitida.');
+    const enviado = await enviarWebhook(montarPayloadAlerta(
+      'Concursos na região (raio 100 km)',
+      'Nenhum novo concurso encontrado num raio de 100 km de Capivari-SP.',
+      runDate
+    ));
+
+    if (enviado) {
+      console.log('[slack] Aviso de nenhum concurso novo na região enviado.');
+    }
+
     return;
   }
 
@@ -188,6 +224,32 @@ export async function notificarConcursos(concursos, runDate) {
 
   if (enviado) {
     console.log(`[slack] Notificação enviada (${concursos.length} concursos).`);
+  }
+}
+
+/**
+ * Mensagem separada, exclusiva para vagas em regime remoto/home office de todo o Brasil.
+ * Quando não há novidades, ainda assim confirma o resultado no Slack.
+ */
+export async function notificarHomeOffice(concursos, runDate) {
+  if (concursos.length === 0) {
+    const enviado = await enviarWebhook(montarPayloadAlerta(
+      'Vagas home office (Brasil)',
+      'Nenhum novo concurso com cargos home office encontrado.',
+      runDate
+    ));
+
+    if (enviado) {
+      console.log('[slack] Aviso de nenhuma vaga home office nova enviado.');
+    }
+
+    return;
+  }
+
+  const enviado = await enviarWebhook(montarPayloadHomeOffice(concursos, runDate));
+
+  if (enviado) {
+    console.log(`[slack] Notificação home office enviada (${concursos.length} vagas).`);
   }
 }
 
@@ -212,18 +274,5 @@ export async function notificarRaspagemAvulsa({ concursos, analise, runDate }) {
 
   if (enviado) {
     console.log(`[slack] Raspagem avulsa enviada (${concursos.length} concursos).`);
-  }
-}
-
-/** Alerta quando nenhum concurso é encontrado — possível falha de cobertura. */
-export async function notificarCoberturaVazia(runDate) {
-  const enviado = await enviarWebhook(montarPayloadAlerta(
-    'Cobertura vazia',
-    'Nenhum concurso encontrado na região. O script pode não estar mais cobrindo as fontes corretamente.',
-    runDate
-  ));
-
-  if (enviado) {
-    console.log('[slack] Alerta de cobertura vazia enviado.');
   }
 }

@@ -17,8 +17,8 @@ jest.unstable_mockModule('node:https', () => ({
 
 const {
   notificarConcursos,
+  notificarHomeOffice,
   notificarBloqueio,
-  notificarCoberturaVazia,
   notificarRaspagemAvulsa
 } = await import('../src/services/slack.js');
 
@@ -62,9 +62,31 @@ describe('slack', () => {
     errorSpy.mockRestore();
   });
 
-  it('omite notificação sem concursos novos', async () => {
+  it('avisa quando não há concursos novos na região', async () => {
+    const logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
     process.env.SLACK_WEBHOOK_URL = 'https://hooks.slack.com/services/T00/B00/xxxxxxxxxxxxxxxxxxxxxxxx';
     await notificarConcursos([], '2026-06-14');
+    expect(postMock).toHaveBeenCalledTimes(1);
+    const payload = postMock.mock.calls[0][1];
+    expect(payload.blocks[1].text.text).toContain('Nenhum novo concurso encontrado num raio de 100 km de Capivari-SP');
+    expect(logSpy).toHaveBeenCalledWith('[slack] Aviso de nenhum concurso novo na região enviado.');
+    logSpy.mockRestore();
+  });
+
+  it('avisa quando não há vagas home office novas', async () => {
+    const logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+    process.env.SLACK_WEBHOOK_URL = 'https://hooks.slack.com/services/T00/B00/xxxxxxxxxxxxxxxxxxxxxxxx';
+    await notificarHomeOffice([], '2026-06-14');
+    expect(postMock).toHaveBeenCalledTimes(1);
+    const payload = postMock.mock.calls[0][1];
+    expect(payload.blocks[1].text.text).toContain('Nenhum novo concurso com cargos home office encontrado');
+    expect(logSpy).toHaveBeenCalledWith('[slack] Aviso de nenhuma vaga home office nova enviado.');
+    logSpy.mockRestore();
+  });
+
+  it('não avisa nada sem webhook configurado', async () => {
+    await notificarConcursos([], '2026-06-14');
+    await notificarHomeOffice([], '2026-06-14');
     expect(postMock).not.toHaveBeenCalled();
   });
 
@@ -99,13 +121,37 @@ describe('slack', () => {
     expect(payload.blocks[2].text.text).toContain('Link indisponível');
   });
 
-  it('ignora alerta de bloqueio sem webhook', async () => {
-    await notificarBloqueio('jcConcursos', 'reCAPTCHA', '2026-06-14');
+  it('envia mensagem separada de vagas home office', async () => {
+    const logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+    process.env.SLACK_WEBHOOK_URL = 'https://hooks.slack.com/services/T00/B00/xxxxxxxxxxxxxxxxxxxxxxxx';
+    await notificarHomeOffice([{ ...concurso, cidade: 'REMOTO (RJ)' }], '2026-06-14');
+    expect(postMock).toHaveBeenCalledTimes(1);
+    const payload = postMock.mock.calls[0][1];
+    expect(payload.blocks[0].text.text).toContain('home office no Brasil');
+    expect(payload.blocks[2].text.text).toContain('REMOTO (RJ)');
+    expect(logSpy).toHaveBeenCalledWith('[slack] Notificação home office enviada (1 vagas).');
+    logSpy.mockRestore();
+  });
+
+  it('limita vagas home office e adiciona contexto extra', async () => {
+    process.env.SLACK_WEBHOOK_URL = 'https://hooks.slack.com/services/T00/B00/xxxxxxxxxxxxxxxxxxxxxxxx';
+    const muitos = Array.from({ length: 21 }, (_, i) => ({
+      ...concurso,
+      cidade: 'REMOTO',
+      link: `https://www.pciconcursos.com.br/noticias/remoto-${i}`
+    }));
+    await notificarHomeOffice(muitos, '2026-06-14');
+    const payload = postMock.mock.calls[0][1];
+    expect(payload.blocks.some((b) => b.elements?.[0]?.text?.includes('vagas home office adicionais'))).toBe(true);
+  });
+
+  it('ignora notificação home office sem webhook', async () => {
+    await notificarHomeOffice([concurso], '2026-06-14');
     expect(postMock).not.toHaveBeenCalled();
   });
 
-  it('ignora alerta de cobertura vazia sem webhook', async () => {
-    await notificarCoberturaVazia('2026-06-14');
+  it('ignora alerta de bloqueio sem webhook', async () => {
+    await notificarBloqueio('jcConcursos', 'reCAPTCHA', '2026-06-14');
     expect(postMock).not.toHaveBeenCalled();
   });
 
@@ -117,17 +163,6 @@ describe('slack', () => {
     const payload = postMock.mock.calls[0][1];
     expect(payload.blocks[0].text.text).toContain('Bloqueio');
     expect(logSpy).toHaveBeenCalledWith('[slack] Alerta de bloqueio enviado (jcConcursos: reCAPTCHA).');
-    logSpy.mockRestore();
-  });
-
-  it('envia alerta de cobertura vazia', async () => {
-    const logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
-    process.env.SLACK_WEBHOOK_URL = 'https://hooks.slack.com/services/T00/B00/xxxxxxxxxxxxxxxxxxxxxxxx';
-    await notificarCoberturaVazia('2026-06-14');
-    expect(postMock).toHaveBeenCalledTimes(1);
-    const payload = postMock.mock.calls[0][1];
-    expect(payload.blocks[0].text.text).toContain('Cobertura vazia');
-    expect(logSpy).toHaveBeenCalledWith('[slack] Alerta de cobertura vazia enviado.');
     logSpy.mockRestore();
   });
 

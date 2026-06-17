@@ -1,6 +1,6 @@
 # Crawler de Concursos Públicos
 
-Crawler modular em Node.js que monitora concursos públicos com inscrições abertas na região de **Capivari-SP** (raio de ~100 km). Os resultados são persistidos em SQLite via **Knex.js** e notificados no Slack quando há concursos **novos**, **bloqueios nas fontes** ou **cobertura vazia**. Há também um modo de **raspagem avulsa** para diagnóstico manual sem persistir no banco.
+Crawler modular em Node.js que monitora concursos públicos com inscrições abertas na região de **Capivari-SP** (raio de ~100 km) **e** vagas em regime **home office / teletrabalho / remoto** em qualquer lugar do Brasil. Os resultados são persistidos em SQLite via **Knex.js** e notificados no Slack: concursos **novos** da região e vagas **home office** em duas **mensagens separadas** (com aviso explícito quando não há novidades), além de alertas de **bloqueio nas fontes**. Há também um modo de **raspagem avulsa** para diagnóstico manual sem persistir no banco.
 
 ---
 
@@ -37,25 +37,26 @@ O runtime já oferece `fetch` nativo (baseado em undici) a partir da v18, elimin
 
 | Módulo | Responsabilidade |
 |--------|------------------|
-| **Spiders** (`jcConcursos`, `pciConcursos`) | Raspagem de sites de concursos, filtro geográfico e validação de links |
+| **Spiders** (`jcConcursos`, `pciConcursos`) | Raspagem das listagens regional e nacional, filtro geográfico e de home office, validação de links |
 | **Spider helpers** (`spiderHelpers.js`) | Fetch seguro, detecção de bloqueio (`BloqueioFonteError`) e normalização dos registros |
 | **Banco SQLite + Knex** (`db.js`) | Persistência via query builder, controle de execução diária e lock contra corridas |
-| **Slack** (`slack.js`) | Notificação de concursos inéditos, bloqueios, cobertura vazia e raspagem avulsa |
-| **Geo filter** (`geoFilter.js`) | Cidades-alvo, detecção de escolaridade, headers HTTP, normalização de texto e fuso horário |
+| **Slack** (`slack.js`) | Notificação de concursos inéditos (região) e vagas home office em mensagens separadas (com aviso de ausência de novidades), bloqueios e raspagem avulsa |
+| **Filtro de concursos** (`concursoFilter.js`) | Cidades-alvo, detecção de escolaridade, detecção de home office/teletrabalho/remoto, headers HTTP, normalização de texto e fuso horário |
 | **Raspagem avulsa** (`looseScrape.js`) | Ordenação por proximidade e diagnóstico de falhas para o modo `--run-loose` |
 | **Segurança** (`security.js`, `httpClient.js`) | Whitelist de domínios, sanitização e limites HTTP |
 | **Agendamento** (systemd) | Execução diária às 10h + catch-up no boot |
 
 ### O que o sistema faz
 
-1. **Raspagem diária** — consulta PCI Concursos (Sudeste) e JC Concursos em busca de vagas em SP.
-2. **Filtro geográfico** — mantém apenas concursos de cidades num raio de ~100 km de Capivari.
-3. **Detecção de escolaridade** — infere o nível (fundamental, médio, técnico, superior) a partir do texto do edital.
-4. **Deduplicação** — remove duplicatas pelo link do concurso.
-5. **Persistência** — grava/atualiza registros em `data/concursos.db`.
-6. **Notificação seletiva** — envia ao Slack concursos novos, alertas de bloqueio (captcha, Cloudflare, etc.) e aviso quando nenhum concurso é encontrado.
-7. **Controle de execução** — impede mais de uma raspagem bem-sucedida por dia; lock com expiração de 30 min.
-8. **Catch-up no boot** — se o PC ligar após as 10h e a raspagem do dia não rodou, executa automaticamente.
+1. **Raspagem diária** — para cada fonte (PCI Concursos e JC Concursos), consulta a listagem regional (SP/Sudeste) **e** a listagem nacional.
+2. **Filtro geográfico** — mantém concursos de cidades num raio de ~100 km de Capivari (categoria `regional`).
+3. **Filtro home office** — na listagem nacional, mantém vagas cujo texto cite regime remoto, teletrabalho, home office, homework etc., de qualquer lugar do Brasil (categoria `homeoffice`).
+4. **Detecção de escolaridade** — infere o nível (fundamental, médio, técnico, superior) a partir do texto do edital.
+5. **Deduplicação e classificação** — remove duplicatas pelo link; um concurso que seja regional **e** home office permanece como regional.
+6. **Persistência** — grava/atualiza registros em `data/concursos.db`.
+7. **Notificação seletiva** — envia ao Slack **duas mensagens separadas** (concursos novos da região e vagas home office novas); quando uma categoria não tem novidades, envia mesmo assim um aviso "nenhum novo concurso encontrado". Alertas de bloqueio (captcha, Cloudflare, etc.) seguem em mensagem própria.
+8. **Controle de execução** — impede mais de uma raspagem bem-sucedida por dia; lock com expiração de 30 min.
+9. **Catch-up no boot** — se o PC ligar após as 10h e a raspagem do dia não rodou, executa automaticamente.
 
 ### Raspagem avulsa (`--run-loose`)
 
@@ -101,7 +102,7 @@ src/
 │   ├── jcConcursos.js
 │   └── pciConcursos.js
 └── utils/
-    ├── geoFilter.js
+    ├── concursoFilter.js
     ├── httpClient.js
     ├── looseScrape.js
     ├── security.js
@@ -155,18 +156,14 @@ flowchart TD
     P -->|Sim| Q[Registrar erro + lançar exceção]
     Q --> Z
 
-    P -->|Não| R[Deduplicar por link]
+    P -->|Não| R[Separar regionais x home office]
     R --> S[Upsert via Knex]
     S --> T[Identificar concursos novos]
     T --> U[Registrar execução success]
     U --> V[Exibir tabela no console]
-    V --> CV{Resultado vazio?}
-    CV -->|Sim| CVN[Notificar cobertura vazia]
-    CVN --> W{Há novos?}
-    CV -->|Não| W
-    W -->|Sim| X[Notificar concursos novos]
-    W -->|Não| Z
-    X --> Z
+    V --> W[Notificar regionais: novos ou aviso de vazio]
+    W --> HO[Notificar home office: novos ou aviso de vazio]
+    HO --> Z
 ```
 
 ---
@@ -218,22 +215,19 @@ sequenceDiagram
             SL-->>IDX: 200 OK
         end
 
-        IDX->>IDX: deduplicarPorLink()
+        IDX->>IDX: separarPorCategoria()
         IDX->>DB: upsertConcursos()
         DB-->>IDX: novos[]
 
         IDX->>DB: registrarExecucao(success)
         IDX->>IDX: exibirResultados()
 
-        opt resultado vazio
-            IDX->>SL: notificarCoberturaVazia()
-            SL-->>IDX: 200 OK
-        end
+        Note over IDX,SL: cada categoria envia novos ou aviso de "nenhum novo"
+        IDX->>SL: notificarConcursos(novosRegionais)
+        SL-->>IDX: 200 OK
 
-        opt novos.length > 0
-            IDX->>SL: notificarConcursos(novos)
-            SL-->>IDX: 200 OK
-        end
+        IDX->>SL: notificarHomeOffice(novosHomeOffice)
+        SL-->>IDX: 200 OK
     end
 
     CLI-->>Timer: exit 0
@@ -340,6 +334,16 @@ A suíte Jest cobre **100%** de statements, branches, functions e lines. Relató
 ## Cidades monitoradas
 
 Capivari, Piracicaba, Campinas, Sorocaba, Indaiatuba, Americana, Limeira, Sumaré, Hortolândia, Itu, Jundiaí, Rio Claro, Santa Bárbara d'Oeste, Laranjal Paulista, Tietê, Porto Feliz, Tatuí, Salto, São Pedro, Rafard, Elias Fausto.
+
+---
+
+## Vagas home office (todo o Brasil)
+
+Independente da região, o crawler também coleta vagas em regime remoto de qualquer lugar do Brasil e as envia em uma **mensagem separada** no Slack. Uma vaga é classificada como home office quando seu texto contém um destes termos (comparação sem acento/caixa):
+
+`home office`, `home-office`, `homeoffice`, `homework`, `remoto`, `remota`, `teletrabalho`, `trabalho remoto`, `trabalho a distância`, `à distância`.
+
+Um concurso que seja, ao mesmo tempo, de uma cidade-alvo **e** home office permanece classificado como regional (não é duplicado na mensagem de home office).
 
 ---
 

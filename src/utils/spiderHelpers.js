@@ -1,4 +1,4 @@
-import { HTTP_HEADERS } from './geoFilter.js';
+import { HTTP_HEADERS } from './concursoFilter.js';
 import { pertenceWhitelist } from './security.js';
 
 const PADROES_BLOQUEIO = [
@@ -50,15 +50,19 @@ export async function buscarHtml(http, url, fonte) {
   return html;
 }
 
-/** Monta objeto de concurso com campos normalizados para persistência. */
-export function criarConcurso({ orgao, cidade, escolaridade, status, link, fonte }) {
+/**
+ * Monta objeto de concurso com campos normalizados para persistência.
+ * `categoria` separa vagas regionais (raio 100 km) das home office (nacionais).
+ */
+export function criarConcurso({ orgao, cidade, escolaridade, status, link, fonte, categoria = 'regional' }) {
   return {
     orgao,
     cidade: cidade.toUpperCase(),
     escolaridade,
     status,
     link,
-    fonte
+    fonte,
+    categoria
   };
 }
 

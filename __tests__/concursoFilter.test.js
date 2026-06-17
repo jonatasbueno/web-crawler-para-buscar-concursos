@@ -3,13 +3,14 @@ import {
   normalizarTexto,
   encontrarCidade,
   detectarEscolaridade,
+  detectarHomeOffice,
   hojeLocal,
   horaLocal,
   CIDADES_ALVO,
   TIMEZONE
-} from '../src/utils/geoFilter.js';
+} from '../src/utils/concursoFilter.js';
 
-describe('geoFilter', () => {
+describe('concursoFilter', () => {
   it('normaliza texto com acentos', () => {
     expect(normalizarTexto('São Paulo')).toBe('sao paulo');
     expect(normalizarTexto(null)).toBe('');
@@ -25,6 +26,21 @@ describe('geoFilter', () => {
   it('detecta escolaridade', () => {
     expect(detectarEscolaridade('nível superior')).toBe('Superior');
     expect(detectarEscolaridade('sem info')).toBe('Não especificado (Verificar edital)');
+  });
+
+  it('detecta vagas em regime home office com diferentes termos', () => {
+    expect(detectarHomeOffice('Vaga em regime remoto')).toBe(true);
+    expect(detectarHomeOffice('Cargo de teletrabalho')).toBe(true);
+    expect(detectarHomeOffice('Atuação home office')).toBe(true);
+    expect(detectarHomeOffice('Modelo home-office')).toBe(true);
+    expect(detectarHomeOffice('Posição homeoffice')).toBe(true);
+    expect(detectarHomeOffice('Trabalho homework')).toBe(true);
+    expect(detectarHomeOffice('Trabalho à distância')).toBe(true);
+  });
+
+  it('não marca como home office vagas presenciais', () => {
+    expect(detectarHomeOffice('Prefeitura de Piracicaba — nível superior')).toBe(false);
+    expect(detectarHomeOffice(null)).toBe(false);
   });
 
   it('expõe timezone e calcula data/hora local', () => {

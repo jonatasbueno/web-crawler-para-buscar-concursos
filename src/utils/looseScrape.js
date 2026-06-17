@@ -1,4 +1,4 @@
-import { normalizarTexto } from './geoFilter.js';
+import { normalizarTexto } from './concursoFilter.js';
 
 /** Proximidade aproximada de Capivari-SP (menor = mais perto). */
 export const ORDEM_PROXIMIDADE = new Map([

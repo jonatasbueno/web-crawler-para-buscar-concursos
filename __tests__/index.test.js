@@ -92,6 +92,42 @@ describe('index', () => {
     expect(lista.find((c) => c.link === 'a').orgao).toBe('2');
   });
 
+  it('separa regionais de home office e prioriza regional em conflito de link', () => {
+    const { regionais, homeOffice } = index.separarPorCategoria([
+      { link: 'a', orgao: 'Regional A', categoria: 'regional' },
+      { link: 'b', orgao: 'Home B', categoria: 'homeoffice' },
+      { link: 'a', orgao: 'Home A', categoria: 'homeoffice' }
+    ]);
+    expect(regionais).toHaveLength(1);
+    expect(regionais[0].orgao).toBe('Regional A');
+    expect(homeOffice).toHaveLength(1);
+    expect(homeOffice[0].link).toBe('b');
+  });
+
+  it('envia mensagem separada para vagas home office', async () => {
+    const spiderHomeOffice = {
+      name: 'remoteSpider',
+      scrape: jest.fn().mockResolvedValue([
+        {
+          orgao: 'Tribunal Federal',
+          cidade: 'REMOTO (RJ)',
+          escolaridade: 'Superior',
+          status: 'Aberto',
+          link: 'https://www.pciconcursos.com.br/noticias/remoto-rj',
+          fonte: 'pciConcursos',
+          categoria: 'homeoffice'
+        }
+      ])
+    };
+
+    await index.executarRaspagem('teste', [spiderOk, spiderHomeOffice]);
+    const headers = postMock.mock.calls
+      .map((call) => call[1].blocks[0]?.text?.text)
+      .filter(Boolean);
+    expect(headers.some((t) => t.includes('home office no Brasil'))).toBe(true);
+    expect(headers.some((t) => t.includes('na região'))).toBe(true);
+  });
+
   it('exibe mensagem quando não há concursos', () => {
     index.exibirResultados([]);
     expect(console.log).toHaveBeenCalled();
@@ -114,7 +150,7 @@ describe('index', () => {
   });
 
   it('executa raspagem com motivo padrão', async () => {
-    const { hojeLocal } = await import('../src/utils/geoFilter.js');
+    const { hojeLocal } = await import('../src/utils/concursoFilter.js');
     const runDate = hojeLocal();
     await db.reservarExecucao(runDate);
     await db.registrarExecucao({ runDate, status: 'error', error: 'x' });
@@ -172,22 +208,25 @@ describe('index', () => {
   });
 
   it('bloqueia execução concorrente', async () => {
-    const { hojeLocal } = await import('../src/utils/geoFilter.js');
+    const { hojeLocal } = await import('../src/utils/concursoFilter.js');
     const runDate = hojeLocal();
     await db.reservarExecucao(runDate);
     const resultado = await index.executarRaspagem('teste', [spiderOk]);
     expect(resultado).toEqual([]);
   });
 
-  it('notifica bloqueio e cobertura vazia', async () => {
+  it('notifica bloqueio e avisos de vazio por categoria', async () => {
     await index.executarRaspagem('teste', [spiderBloqueado, spiderVazio]);
     expect(postMock.mock.calls.length).toBeGreaterThanOrEqual(2);
   });
 
-  it('notifica cobertura vazia sem concursos', async () => {
+  it('avisa por categoria quando não há concursos', async () => {
     await index.executarRaspagem('teste', [spiderVazio]);
-    const payloads = postMock.mock.calls.map((call) => call[1]);
-    expect(payloads.some((p) => p.blocks[0].text.text.includes('Cobertura vazia'))).toBe(true);
+    const textos = postMock.mock.calls
+      .map((call) => call[1].blocks.map((b) => b.text?.text ?? '').join(' '))
+      .join(' ');
+    expect(textos).toContain('Nenhum novo concurso encontrado num raio de 100 km de Capivari-SP');
+    expect(textos).toContain('Nenhum novo concurso com cargos home office encontrado');
   });
 
   it('registra erro quando todos os spiders falham', async () => {

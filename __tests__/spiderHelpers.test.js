@@ -2,7 +2,8 @@ import { describe, it, expect, jest } from '@jest/globals';
 import {
   detectarBloqueio,
   BloqueioFonteError,
-  buscarHtml
+  buscarHtml,
+  criarConcurso
 } from '../src/utils/spiderHelpers.js';
 
 describe('spiderHelpers', () => {
@@ -39,6 +40,32 @@ describe('spiderHelpers', () => {
     await expect(
       buscarHtml(http, 'https://jcconcursos.com.br/concursos/sp', 'jcConcursos')
     ).rejects.toBeInstanceOf(BloqueioFonteError);
+  });
+
+  it('cria concurso normalizado com categoria regional por padrão', () => {
+    const concurso = criarConcurso({
+      orgao: 'Prefeitura',
+      cidade: 'piracicaba',
+      escolaridade: 'Superior',
+      status: 'Aberto',
+      link: 'https://www.pciconcursos.com.br/x',
+      fonte: 'pciConcursos'
+    });
+    expect(concurso.cidade).toBe('PIRACICABA');
+    expect(concurso.categoria).toBe('regional');
+  });
+
+  it('cria concurso home office quando categoria é informada', () => {
+    const concurso = criarConcurso({
+      orgao: 'Tribunal',
+      cidade: 'Remoto',
+      escolaridade: 'Superior',
+      status: 'Aberto',
+      link: 'https://www.pciconcursos.com.br/y',
+      fonte: 'pciConcursos',
+      categoria: 'homeoffice'
+    });
+    expect(concurso.categoria).toBe('homeoffice');
   });
 
   it('rejeita fonte não permitida', async () => {

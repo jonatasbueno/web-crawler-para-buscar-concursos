@@ -11,15 +11,15 @@ import {
 } from './database/db.js';
 import {
   notificarConcursos,
+  notificarHomeOffice,
   notificarBloqueio,
-  notificarCoberturaVazia,
   notificarRaspagemAvulsa
 } from './services/slack.js';
 import { BloqueioFonteError } from './utils/spiderHelpers.js';
 import { analisarCausaRaiz, ordenarConcursosAvulsa } from './utils/looseScrape.js';
 import jcConcursos from './spiders/jcConcursos.js';
 import pciConcursos from './spiders/pciConcursos.js';
-import { hojeLocal, horaLocal } from './utils/geoFilter.js';
+import { hojeLocal, horaLocal } from './utils/concursoFilter.js';
 
 export const SPIDERS = [jcConcursos, pciConcursos];
 export const HORA_AGENDADA = 10;
@@ -30,6 +30,21 @@ const COLUNAS_EXIBICAO = ['cidade', 'orgao', 'escolaridade', 'fonte', 'link'];
 export function deduplicarPorLink(concursos) {
   const porLink = new Map(concursos.map((c) => [c.link, c]));
   return [...porLink.values()];
+}
+
+/**
+ * Separa concursos regionais (raio 100 km) das vagas home office (nacionais).
+ * Um concurso que apareça nas duas categorias permanece como regional —
+ * o link já coberto pela região é removido da lista home office.
+ */
+export function separarPorCategoria(concursos) {
+  const regionais = deduplicarPorLink(concursos.filter((c) => c.categoria !== 'homeoffice'));
+  const linksRegionais = new Set(regionais.map((c) => c.link));
+  const homeOffice = deduplicarPorLink(
+    concursos.filter((c) => c.categoria === 'homeoffice' && !linksRegionais.has(c.link))
+  );
+
+  return { regionais, homeOffice };
 }
 
 /**
@@ -84,7 +99,8 @@ export async function executarRaspagem(motivo = 'manual', spiders = SPIDERS) {
       throw new Error(falhas.join(' | '));
     }
 
-    const unicos = deduplicarPorLink(concursos);
+    const { regionais, homeOffice } = separarPorCategoria(concursos);
+    const unicos = [...regionais, ...homeOffice];
     const novos = await upsertConcursos(unicos);
 
     await registrarExecucao({ runDate, status: 'success', total: unicos.length });
@@ -92,11 +108,11 @@ export async function executarRaspagem(motivo = 'manual', spiders = SPIDERS) {
 
     console.log(`[${motivo}] ${novos.length} concurso(s) novo(s) de ${unicos.length} encontrado(s).`);
 
-    if (unicos.length === 0) {
-      await notificarCoberturaVazia(runDate);
-    }
+    const novosRegionais = novos.filter((c) => c.categoria !== 'homeoffice');
+    const novosHomeOffice = novos.filter((c) => c.categoria === 'homeoffice');
 
-    await notificarConcursos(novos, runDate);
+    await notificarConcursos(novosRegionais, runDate);
+    await notificarHomeOffice(novosHomeOffice, runDate);
 
     return unicos;
   } catch (error) {
@@ -155,10 +171,10 @@ export async function verificarExecucaoPendente(
 }
 
 export function exibirResultados(concursos) {
-  console.log(`\n--- CONCURSOS ENCONTRADOS NO RAIO DE 100KM (${concursos.length}) ---`);
+  console.log(`\n--- CONCURSOS ENCONTRADOS — REGIÃO (100KM) + HOME OFFICE (${concursos.length}) ---`);
 
   if (concursos.length === 0) {
-    console.log('Nenhum concurso com inscrições abertas nesta região hoje.');
+    console.log('Nenhum concurso com inscrições abertas encontrado hoje.');
     return;
   }
 

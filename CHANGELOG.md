@@ -7,9 +7,24 @@ e este projeto adere ao [Versionamento Semântico](https://semver.org/lang/pt-BR
 
 ## [Não publicado]
 
+### Adicionado
+
+- Cobertura de vagas em regime **home office / teletrabalho / remoto** em todo o Brasil, além do raio de 100 km já existente
+- Função `detectarHomeOffice` e lista `TERMOS_HOME_OFFICE` (inclui `homework`) em `concursoFilter.js`
+- Coleta da listagem nacional em cada spider (`jcConcursos`, `pciConcursos`), com classificação por `categoria` (`regional` | `homeoffice`)
+- `separarPorCategoria` no orquestrador, priorizando `regional` quando o mesmo link aparece nas duas categorias
+- Notificação Slack `notificarHomeOffice` — **mensagem separada** exclusiva para vagas home office
+- Aviso de ausência de novidades por categoria: quando não há concursos novos, `notificarConcursos` e `notificarHomeOffice` enviam "Nenhum novo concurso encontrado num raio de 100 km de Capivari-SP" e "Nenhum novo concurso com cargos home office encontrado"
+- Testes para detecção de home office, extração nacional dos spiders, separação por categoria, notificação dedicada e avisos de vazio por categoria
+
 ### Alterado
 
+- `src/utils/geoFilter.js` renomeado para `src/utils/concursoFilter.js` (passou a cobrir busca nacional, não só geográfica)
 - README expandido com modo de raspagem avulsa, árvore de arquivos, comandos `run:loose` e `db:clear`, e diagramas corrigidos
+
+### Removido
+
+- Alerta genérico de "cobertura vazia" (`notificarCoberturaVazia`) — substituído pelos avisos de ausência de novidades por categoria, evitando mensagens redundantes em dias sem resultados
 
 ## [1.0.0] - 2026-06-15
 

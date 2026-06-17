@@ -14,6 +14,17 @@ export const ESCOLARIDADES_ALVO = [
   'fundamental', 'medio', 'tecnico', 'superior', 'medio/tecnico'
 ];
 
+/**
+ * Termos que indicam vaga em regime remoto, válidos em qualquer lugar do Brasil.
+ * Comparados sobre texto já normalizado (sem acento, minúsculo): 'a distancia'
+ * cobre "à distância" e 'teletrabalho' cobre "teletrabalho".
+ */
+export const TERMOS_HOME_OFFICE = [
+  'home office', 'home-office', 'homeoffice', 'homework',
+  'remoto', 'remota', 'teletrabalho', 'trabalho remoto',
+  'trabalho a distancia', 'a distancia'
+];
+
 export const HTTP_HEADERS = {
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
   'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
@@ -80,4 +91,13 @@ export function detectarEscolaridade(...textos) {
   return nivel
     ? nivel.charAt(0).toUpperCase() + nivel.slice(1)
     : 'Não especificado (Verificar edital)';
+}
+
+/**
+ * Indica se o concurso é em regime remoto/teletrabalho/home office.
+ * Independe de cidade — vale para vagas de todo o Brasil.
+ */
+export function detectarHomeOffice(...textos) {
+  const combinado = normalizarTexto(textos.filter(Boolean).join(' '));
+  return TERMOS_HOME_OFFICE.some((termo) => combinado.includes(termo));
 }
